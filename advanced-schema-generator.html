@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced JSON Schema Generator</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            background: #f9f9f9;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        h1, h2, h3 {
+            color: #2c3e50;
+        }
+        button {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 0;
+        }
+        button:hover {
+            background: #2980b9;
+        }
+        input[type="file"] {
+            margin: 10px 0;
+            padding: 10px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        .property-container {
+            margin-bottom: 15px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #fff;
+        }
+        .property-path {
+            font-weight: bold;
+            margin-bottom: 5px;
+            color: #2c3e50;
+        }
+        .property-options {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin: 10px 0;
+        }
+        .indent {
+            margin-left: 20px;
+        }
+        label {
+            margin-right: 15px;
+            user-select: none;
+        }
+        select {
+            padding: 5px;
+            border-radius: 3px;
+        }
+        .schema-output {
+            width: 100%;
+            height: 300px;
+            font-family: monospace;
+            padding: 10px;
+            box-sizing: border-box;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .info-bar {
+            background: #eee;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            font-size: 0.9em;
+            color: #555;
+        }
+        .type-format {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-top: 5px;
+        }
+        .nested-properties {
+            margin-left: 20px;
+            border-left: 2px solid #3498db;
+            padding-left: 15px;
+        }
+        .toggle-btn {
+            background: #eee;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            padding: 3px 8px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .toggle-btn:hover {
+            background: #ddd;
+        }
+        .hidden {
+            display: none;
+        }
+        .example-value {
+            font-family: monospace;
+            color: #7f8c8d;
+            font-size: 0.9em;
+            margin-top: 5px;
+            max-width: 500px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="info-bar">
+            <!-- Date and user info -->
+            <div>Date: 2025-04-18 03:49:38 (UTC)</div>
+            <div>User: SunnySkye</div>
+        </div>
+
+        <h1>Advanced JSON Schema Generator</h1>
+        
+        <div id="upload-section">
+            <h2>Step 1: Upload JSON</h2>
+            <input type="file" id="json-file" accept=".json">
+            <p>Select a JSON file to analyze and generate schema options.</p>
+        </div>
+        
+        <div id="options-section" style="display: none;">
+            <h2>Step 2: Configure Schema Options</h2>
+            <div>
+                <button id="select-all">Select All</button>
+                <button id="deselect-all">Deselect All</button>
+                <button id="toggle-required">Toggle All Required</button>
+            </div>
+            <div id="property-list"></div>
+            <button id="generate-schema">Generate Schema</button>
+        </div>
+        
+        <div id="output-section" style="display: none;">
+            <h2>Step 3: Generated Schema</h2>
+            <select id="schema-format">
+                <option value="json-schema">JSON Schema</option>
+                <option value="typescript">TypeScript Interface</option>
+                <option value="mongoose">Mongoose Schema</option>
+            </select>
+            <button id="copy-schema">Copy to Clipboard</button>
+            <pre><textarea id="schema-output" class="schema-output" readonly></textarea></pre>
+            <button id="start-over">Start Over</button>
+        </div>
+    </div>
+
+    <script>
+        // Global variables to store data
+        let jsonData = null;
+        let propertyMap = new Map();
+        
+        // DOM elements
+        const jsonFileInput = document.getElementById('json-file');
+        const propertyListDiv = document.getElementById('property-list');
+        const uploadSection = document.getElementById('upload-section');
+        const optionsSection = document.getElementById('options-section');
+        const outputSection = document.getElementById('output-section');
+        const schemaOutput = document.getElementById('schema-output');
+        const generateSchemaBtn = document.getElementById('generate-schema');
+        const copySchemaBtn = document.getElementById('copy-schema');
+        const startOverBtn = document.getElementById('start-over');
+        const selectAllBtn = document.getElementById('select-all');
+        const deselectAllBtn = document.getElementById('deselect-all');
+        const toggleRequiredBtn = document.getElementById('toggle-required');
+        const schemaFormatSelect = document.getElementById('schema-format');
+        
+        // File upload handler
+        jsonFileInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    jsonData = JSON.parse(e.target.result);
+                    analyzeJsonStructure(jsonData);
+                    uploadSection.style.display = 'none';
+                    optionsSection.style.display = 'block';
+                } catch (error) {
+                    alert('Invalid JSON file: ' + error.message);
+                }
+            };
+            reader.readAsText(file);
+        });
+        
+        // Analyze JSON structure and create property options
+        function analyzeJsonStructure(json, parentPath = '') {
+            if (typeof json !== 'object' || json === null) {
+                return;
+            }
+            
+            propertyListDiv.innerHTML = '';
+            propertyMap.clear();
+            
+            // If root is an array, handle its first item
+            if (Array.isArray(json)) {
+                if (json.length > 0) {
+                    analyzeJsonStructure(json[0], 'items');
+                }
+                return;
+            }
+            
+            // Handle object properties
+            processProperties(json, parentPath);
+            
+            // Create HTML elements for properties
+            renderPropertyOptions();
+        }
+        
+        function processProperties(obj, parentPath = '') {
+            for (const [key, value] of Object.entries(obj)) {
+                const path = parentPath ? `${parentPath}.${key}` : key;
+                const type = detectType(value);
+                
+                // Store property metadata
+                propertyMap.set(path, {
+                    key,
+                    path,
+                    type,
+                    format: getDefaultFormat(type, value),
+                    value: formatExampleValue(value, type),
+                    include: true,
+                    required: true,
+                    children: []
+                });
+                
+                // Process nested objects and arrays
+                if (type === 'object' && value !== null) {
+                    processProperties(value, path);
+                } else if (type === 'array' && value.length > 0 && typeof value[0] === 'object') {
+                    processProperties(value[0], `${path}[]`);
+                }
+            }
+        }
+        
+        function renderPropertyOptions() {
+            // Group properties by parent path
+            const groupedProperties = new Map();
+            
+            propertyMap.forEach((propInfo, path) => {
+                const lastDotIndex = path.lastIndexOf('.');
+                const parentPath = lastDotIndex > -1 ? path.substring(0, lastDotIndex) : '';
+                
+                if (!groupedProperties.has(parentPath)) {
+                    groupedProperties.set(parentPath, []);
+                }
+                
+                groupedProperties.get(parentPath).push(propInfo);
+                
+                if (parentPath) {
+                    const parentProp = propertyMap.get(parentPath);
+                    if (parentProp) {
+                        parentProp.children.push(propInfo);
+                    }
+                }
+            });
+            
+            // Render top-level properties first
+            const rootProperties = groupedProperties.get('') || [];
+            renderPropertyGroup(rootProperties, propertyListDiv);
+        }
+        
+        function renderPropertyGroup(properties, container) {
+            properties.forEach(prop => {
+                const propContainer = document.createElement('div');
+                propContainer.className = 'property-container';
+                propContainer.dataset.path = prop.path;
+                
+                const hasChildren = prop.children && prop.children.length > 0;
+                
+                propContainer.innerHTML = `
+                    <div class="property-path">${prop.path} (${prop.type})</div>
+                    <div class="property-options">
+                        <label>
+                            <input type="checkbox" class="include-prop" data-path="${prop.path}" ${prop.include ? 'checked' : ''}>
+                            Include in schema
+                        </label>
+                        <label>
+                            <input type="checkbox" class="required-prop" data-path="${prop.path}" ${prop.required ? 'checked' : ''}>
+                            Required
+                        </label>
+                    </div>
+                    <div class="type-format">
+                        <label>Type:
+                            <select class="type-select" data-path="${prop.path}">
+                                <option value="string" ${prop.type === 'string' ? 'selected' : ''}>string</option>
+                                <option value="number" ${prop.type === 'number' ? 'selected' : ''}>number</option>
+                                <option value="integer" ${prop.type === 'number' ? 'selected' : ''}>integer</option>
+                                <option value="boolean" ${prop.type === 'boolean' ? 'selected' : ''}>boolean</option>
+                                <option value="object" ${prop.type === 'object' ? 'selected' : ''}>object</option>
+                                <option value="array" ${prop.type === 'array' ? 'selected' : ''}>array</option>
+                                <option value="null" ${prop.type === 'null' ? 'selected' : ''}>null</option>
+                            </select>
+                        </label>
+                        <label>Format:
+                            <select class="format-select" data-path="${prop.path}">
+                                <option value="">none</option>
+                                <option value="date-time" ${prop.format === 'date-time' ? 'selected' : ''}>date-time</option>
+                                <option value="date" ${prop.format === 'date' ? 'selected' : ''}>date</option>
+                                <option value="email" ${prop.format === 'email' ? 'selected' : ''}>email</option>
+                                <option value="uri" ${prop.format === 'uri' ? 'selected' : ''}>uri</option>
+                                <option value="uuid" ${prop.format === 'uuid' ? 'selected' : ''}>uuid</option>
+                            </select>
+                        </label>
+                    </div>
+                    <div class="example-value">Example: ${prop.value}</div>
+                    ${hasChildren ? `
+                        <button class="toggle-btn" data-path="${prop.path}">Show ${prop.children.length} nested properties</button>
+                        <div class="nested-properties" id="nested-${prop.path.replace(/\./g, '-')}" style="display: none;"></div>
+                    ` : ''}
+                `;
+                
+                container.appendChild(propContainer);
+                
+                // Add nested properties if any
+                if (hasChildren) {
+                    const nestedContainer = propContainer.querySelector(`.nested-properties`);
+                    renderPropertyGroup(prop.children, nestedContainer);
+                    
+                    // Add toggle functionality
+                    const toggleBtn = propContainer.querySelector('.toggle-btn');
+                    toggleBtn.addEventListener('click', () => {
+                        const nestedProps = document.getElementById(`nested-${prop.path.replace(/\./g, '-')}`);
+                        const isHidden = nestedProps.style.display === 'none';
+                        nestedProps.style.display = isHidden ? 'block' : 'none';
+                        toggleBtn.textContent = isHidden ? 
+                            `Hide ${prop.children.length} nested properties` : 
+                            `Show ${prop.children.length} nested properties`;
+                    });
+                }
+                
+                // Add event listeners for property options
+                const includeCheckbox = propContainer.querySelector('.include-prop');
+                includeCheckbox.addEventListener('change', (e) => {
+                    const path = e.target.dataset.path;
+                    const propInfo = propertyMap.get(path);
+                    if (propInfo) {
+                        propInfo.include = e.target.checked;
+                    }
+                });
+                
+                const requiredCheckbox = propContainer.querySelector('.required-prop');
+                requiredCheckbox.addEventListener('change', (e) => {
+                    const path = e.target.dataset.path;
+                    const propInfo = propertyMap.get(path);
+                    if (propInfo) {
+                        propInfo.required = e.target.checked;
+                    }
+                });
+                
+                const typeSelect = propContainer.querySelector('.type-select');
+                typeSelect.addEventListener('change', (e) => {
+                    const path = e.target.dataset.path;
+                    const propInfo = propertyMap.get(path);
+                    if (propInfo) {
+                        propInfo.type = e.target.value;
+                    }
+                });
+                
+                const formatSelect = propContainer.querySelector('.format-select');
+                formatSelect.addEventListener('change', (e) => {
+                    const path = e.target.dataset.path;
+                    const propInfo = propertyMap.get(path);
+                    if (propInfo) {
+                        propInfo.format = e.target.value;
+                    }
+                });
+            });
+        }
+        
+        // Utility functions
+        function detectType(value) {
+            if (value === null) return 'null';
+            if (Array.isArray(value)) return 'array';
+            const type = typeof value;
+            // Handle special case for integers
+            if (type === 'number' && Number.isInteger(value)) {
+                return 'number'; // We'll handle integer as a format
+            }
+            return type;
+        }
+        
+        function getDefaultFormat(type, value) {
+            if (type === 'string') {
+                // Try to detect common string formats
+                if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value)) return 'date-time';
+                if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return 'date';
+                if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return 'email';
+                if (/^https?:\/\//.test(value)) return 'uri';
+                if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) return 'uuid';
+            }
+            return '';
+        }
+        
+        function formatExampleValue(value, type) {
+            if (type === 'object') {
+                return JSON.stringify(value).substring(0, 50) + (JSON.stringify(value).length > 50 ? '...' : '');
+            } else if (type === 'array') {
+                return JSON.stringify(value).substring(0, 50) + (JSON.stringify(value).length > 50 ? '...' : '');
+            } else {
+                return String(value).substring(0, 50) + (String(value).length > 50 ? '...' : '');
+            }
+        }
+        
+        // Generate schema based on options
+        function generateSchema() {
+            const format = schemaFormatSelect.value;
+            let schema;
+            
+            switch (format) {
+                case 'json-schema':
+                    schema = generateJsonSchema();
+                    break;
+                case 'typescript':
+                    schema = generateTypeScriptInterface();
+                    break;
+                case 'mongoose':
+                    schema = generateMongooseSchema();
+                    break;
+                default:
+                    schema = generateJsonSchema();
+            }
+            
+            schemaOutput.value = schema;
+            optionsSection.style.display = 'none';
+            outputSection.style.display = 'block';
+        }
+        
+        function generateJsonSchema() {
+            const schema = {
+                $schema: "http://json-schema.org/draft-07/schema#",
+                type: "object",
+                properties: {},
+                required: []
+            };
+            
+            // Handle top-level properties
+            for (const [path, propInfo] of propertyMap.entries()) {
+                if (!propInfo.include || path.includes('.')) continue;
+                
+                const propSchema = createJsonSchemaProperty(propInfo);
+                schema.properties[propInfo.key] = propSchema;
+                
+                if (propInfo.required) {
+                    schema.required.push(propInfo.key);
+                }
+            }
+            
+            // Clean up if no required properties
+            if (schema.required.length === 0) {
+                delete schema.required;
+            }
+            
+            return JSON.stringify(schema, null, 2);
+        }
+        
+        function createJsonSchemaProperty(propInfo) {
+            const propSchema = {
+                type: propInfo.type
+            };
+            
+            if (propInfo.format) {
+                propSchema.format = propInfo.format;
+            }
+            
+            // Handle nested objects
+            if (propInfo.type === 'object' && propInfo.children.length > 0) {
+                propSchema.properties = {};
+                propSchema.required = [];
+                
+                propInfo.children.forEach(childProp => {
+                    if (!childProp.include) return;
+                    
+                    const childKey = childProp.key.includes('.') ? 
+                        childProp.key.substring(childProp.key.lastIndexOf('.') + 1) : 
+                        childProp.key;
+                    
+                    propSchema.properties[childKey] = createJsonSchemaProperty(childProp);
+                    
+                    if (childProp.required) {
+                        propSchema.required.push(childKey);
+                    }
+                });
+                
+                // Clean up if no required properties
+                if (propSchema.required.length === 0) {
+                    delete propSchema.required;
+                }
+            }
+            
+            // Handle arrays
+            if (propInfo.type === 'array') {
+                // Find array item properties
+                const arrayItemPath = `${propInfo.path}[]`;
+                const arrayItemProps = Array.from(propertyMap.values())
+                    .filter(p => p.path.startsWith(arrayItemPath));
+                
+                if (arrayItemProps.length > 0) {
+                    // Array contains objects
+                    propSchema.items = {
+                        type: 'object',
+                        properties: {},
+                        required: []
+                    };
+                    
+                    arrayItemProps.forEach(itemProp => {
+                        if (!itemProp.include) return;
+                        
+                        const itemKey = itemProp.key.includes('.') ? 
+                            itemProp.key.substring(itemProp.key.lastIndexOf('.') + 1) : 
+                            itemProp.key;
+                        
+                        propSchema.items.properties[itemKey] = createJsonSchemaProperty(itemProp);
+                        
+                        if (itemProp.required) {
+                            propSchema.items.required.push(itemKey);
+                        }
+                    });
+                    
+                    // Clean up if no required properties
+                    if (propSchema.items.required.length === 0) {
+                        delete propSchema.items.required;
+                    }
+                } else {
+                    // Simple array
+                    propSchema.items = { type: 'string' }; // Default
+                }
+            }
+            
+            return propSchema;
+        }
+        
+        function generateTypeScriptInterface() {
+            let interfaces = [];
+            let mainInterface = 'interface Root {\n';
+            
+            // Process top-level properties
+            for (const [path, propInfo] of propertyMap.entries()) {
+                if (!propInfo.include || path.includes('.')) continue;
+                
+                const tsType = getTypeScriptType(propInfo);
+                const optionalMark = propInfo.required ? '' : '?';
+                mainInterface += `  ${propInfo.key}${optionalMark}: ${tsType};\n`;
+                
+                // Generate nested interfaces for complex types
+                if (propInfo.type === 'object' && propInfo.children.length > 0) {
+                    interfaces.push(generateNestedInterface(propInfo));
+                }
+                else if (propInfo.type === 'array' && propInfo.children.length > 0) {
+                    // Handle array of objects
+                    interfaces.push(generateNestedInterface(propInfo, true));
+                }
+            }
+            
+            mainInterface += '}\n';
+            
+            return interfaces.join('\n') + mainInterface;
+        }
+        
+        function generateNestedInterface(propInfo, isArray = false) {
+            const interfaceName = capitalizeFirstLetter(propInfo.key) + (isArray ? 'Item' : '');
+            let interfaceStr = `interface ${interfaceName} {\n`;
+            
+            propInfo.children.forEach(childProp => {
+                if (!childProp.include) return;
+                
+                const childKey = childProp.key.includes('.') ? 
+                    childProp.key.substring(childProp.key.lastIndexOf('.') + 1) : 
+                    childProp.key;
+                
+                const tsType = getTypeScriptType(childProp);
+                const optionalMark = childProp.required ? '' : '?';
+                interfaceStr += `  ${childKey}${optionalMark}: ${tsType};\n`;
+            });
+            
+            interfaceStr += '}\n';
+            return interfaceStr;
+        }
+        
+        function getTypeScriptType(propInfo) {
+            switch (propInfo.type) {
+                case 'string':
+                    return 'string';
+                case 'number':
+                    return 'number';
+                case 'boolean':
+                    return 'boolean';
+                case 'null':
+                    return 'null';
+                case 'object':
+                    if (propInfo.children.length > 0) {
+                        return capitalizeFirstLetter(propInfo.key);
+                    }
+                    return 'Record<string, unknown>';
+                case 'array':
+                    if (propInfo.children.length > 0) {
+                        return `${capitalizeFirstLetter(propInfo.key)}Item[]`;
+                    }
+                    return 'any[]';
+                default:
+                    return 'any';
+            }
+        }
+        
+        function generateMongooseSchema() {
+            let schema = 'const mongoose = require(\'mongoose\');\n';
+            schema += 'const Schema = mongoose.Schema;\n\n';
+            schema += 'const schema = new Schema({\n';
+            
+            // Process top-level properties
+            for (const [path, propInfo] of propertyMap.entries()) {
+                if (!propInfo.include || path.includes('.')) continue;
+                
+                schema += `  ${propInfo.key}: {\n`;
+                schema += `    type: ${getMongooseType(propInfo)},\n`;
+                schema += `    required: ${propInfo.required},\n`;
+                
+                if (propInfo.format === 'date-time' || propInfo.format === 'date') {
+                    schema += `    // This is a date field\n`;
+                }
+                
+                // Handle nested objects and arrays
+                if (propInfo.type === 'object' && propInfo.children.length > 0) {
+                    schema += getMongooseNestedSchema(propInfo);
+                }
+                else if (propInfo.type === 'array' && propInfo.children.length > 0) {
+                    schema += `    // This is an array of objects\n`;
+                }
+                
+                schema += `  },\n`;
+            }
+            
+            schema += '});\n\n';
+            schema += 'module.exports = mongoose.model(\'YourModel\', schema);\n';
+            
+            return schema;
+        }
+        
+        function getMongooseType(propInfo) {
+            switch (propInfo.type) {
+                case 'string':
+                    return 'String';
+                case 'number':
+                    return 'Number';
+                case 'boolean':
+                    return 'Boolean';
+                case 'object':
+                    return 'Object';
+                case 'array':
+                    return '[' + (propInfo.children.length > 0 ? 'Object' : 'Schema.Types.Mixed') + ']';
+                case 'null':
+                    return 'Schema.Types.Mixed';
+                default:
+                    return 'Schema.Types.Mixed';
+            }
+        }
+        
+        function getMongooseNestedSchema(propInfo) {
+            let nestedSchema = '';
+            
+            if (propInfo.children.length > 0) {
+                nestedSchema += `    // Nested schema\n`;
+            }
+            
+            return nestedSchema;
+        }
+        
+        function capitalizeFirstLetter(string) {
+            return string.charAt(0).toUpperCase() + string.slice(1);
+        }
+        
+        // Event listeners
+        generateSchemaBtn.addEventListener('click', generateSchema);
+        
+        copySchemaBtn.addEventListener('click', () => {
+            schemaOutput.select();
+            document.execCommand('copy');
+            alert('Schema copied to clipboard!');
+        });
+        
+        startOverBtn.addEventListener('click', () => {
+            jsonFileInput.value = '';
+            propertyListDiv.innerHTML = '';
+            schemaOutput.value = '';
+            jsonData = null;
+            propertyMap.clear();
+            
+            uploadSection.style.display = 'block';
+            optionsSection.style.display = 'none';
+            outputSection.style.display = 'none';
+        });
+        
+        selectAllBtn.addEventListener('click', () => {
+            document.querySelectorAll('.include-prop').forEach(checkbox => {
+                checkbox.checked = true;
+                const path = checkbox.dataset.path;
+                const propInfo = propertyMap.get(path);
+                if (propInfo) {
+                    propInfo.include = true;
+                }
+            });
+        });
+        
+        deselectAllBtn.addEventListener('click', () => {
+            document.querySelectorAll('.include-prop').forEach(checkbox => {
+                checkbox.checked = false;
+                const path = checkbox.dataset.path;
+                const propInfo = propertyMap.get(path);
+                if (propInfo) {
+                    propInfo.include = false;
+                }
+            });
+        });
+        
+        toggleRequiredBtn.addEventListener('click', () => {
+            document.querySelectorAll('.required-prop').forEach(checkbox => {
+                checkbox.checked = !checkbox.checked;
+                const path = checkbox.dataset.path;
+                const propInfo = propertyMap.get(path);
+                if (propInfo) {
+                    propInfo.required = checkbox.checked;
+                }
+            });
+        });
+        
+        schemaFormatSelect.addEventListener('change', () => {
+            // If schema is already generated, regenerate with new format
+            if (outputSection.style.display === 'block') {
+                generateSchema();
+            }
+        });
+    </script>
+</body>
+</html>

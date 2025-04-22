@@ -111,6 +111,12 @@
             width: 0%;
             transition: width 0.3s;
         }
+        
+        .status-message {
+            margin-top: 10px;
+            font-size: 14px;
+            color: #7f8c8d;
+        }
     </style>
 </head>
 <body>
@@ -128,6 +134,7 @@
         <div class="progress-container" id="progressContainer">
             <div class="progress-bar" id="progressBar"></div>
         </div>
+        <div class="status-message" id="statusMessage"></div>
         
         <button class="btn" id="calculateBtn" disabled>Calculate Hashes</button>
         
@@ -144,6 +151,7 @@
             const fileInfo = document.getElementById('fileInfo');
             const progressContainer = document.getElementById('progressContainer');
             const progressBar = document.getElementById('progressBar');
+            const statusMessage = document.getElementById('statusMessage');
             
             let selectedFile = null;
             
@@ -212,6 +220,7 @@
                 
                 // Clear previous results
                 hashResults.innerHTML = '';
+                statusMessage.textContent = '';
             }
             
             function formatFileSize(bytes) {
@@ -234,12 +243,13 @@
                 
                 // Clear previous results
                 hashResults.innerHTML = '<p>Calculating hashes, please wait...</p>';
+                statusMessage.textContent = 'Initializing...';
                 
                 // Disable the button
                 calculateBtn.disabled = true;
                 
                 try {
-                    const hashes = await calculateHashes(selectedFile);
+                    const hashes = await calculateHashesChunked(selectedFile);
                     
                     // Display results
                     hashResults.innerHTML = '';
@@ -270,17 +280,18 @@
                     });
                 } catch (error) {
                     hashResults.innerHTML = `<p style="color: red;">Error calculating hashes: ${error.message}</p>`;
+                    console.error('Hash calculation error:', error);
                 } finally {
                     // Hide progress bar and re-enable button
                     progressBar.style.width = '100%';
+                    statusMessage.textContent = 'Completed';
                     setTimeout(() => {
-                        progressContainer.style.display = 'none';
                         calculateBtn.disabled = false;
                     }, 500);
                 }
             });
             
-            async function calculateHashes(file) {
+            async function calculateHashesChunked(file) {
                 const hashFunctions = {
                     md5: 'MD5',
                     sha1: 'SHA-1',
@@ -290,34 +301,171 @@
                 };
                 
                 const results = {};
-                const totalSteps = Object.keys(hashFunctions).length;
-                let completedSteps = 0;
+                const totalAlgorithms = Object.keys(hashFunctions).length;
+                let completedAlgorithms = 0;
                 
-                // Create a chunk reader to handle large files
                 for (const [key, algo] of Object.entries(hashFunctions)) {
-                    results[key] = await digestFile(file, algo);
+                    statusMessage.textContent = `Calculating ${algo}...`;
+                    results[key] = await digestFileInChunks(file, algo);
                     
                     // Update progress
-                    completedSteps++;
-                    progressBar.style.width = `${(completedSteps / totalSteps) * 100}%`;
+                    completedAlgorithms++;
+                    progressBar.style.width = `${(completedAlgorithms / totalAlgorithms) * 100}%`;
                 }
                 
                 return results;
             }
             
-            // Function to calculate a hash for a file
-            async function digestFile(file, algorithm) {
-                // Read the file as an ArrayBuffer
-                const arrayBuffer = await readFileAsArrayBuffer(file);
-                
-                // Use subtle crypto to calculate hash
-                const hashBuffer = await crypto.subtle.digest(algorithm, arrayBuffer);
-                
-                // Convert to hex string
-                const hashArray = Array.from(new Uint8Array(hashBuffer));
-                const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-                
-                return hashHex;
+            // Function to calculate a hash for a file in chunks
+            async function digestFileInChunks(file, algorithm) {
+                return new Promise((resolve, reject) => {
+                    const chunkSize = 2 * 1024 * 1024; // 2MB chunks
+                    const fileSize = file.size;
+                    let offset = 0;
+                    
+                    // Create a crypto object for the specific algorithm
+                    let crypto;
+                    try {
+                        crypto = self.crypto.subtle;
+                    } catch (e) {
+                        reject(new Error("Crypto API not supported"));
+                        return;
+                    }
+                    
+                    // Initialize the hasher
+                    crypto.digest(algorithm, new ArrayBuffer(0))
+                        .then(() => {
+                            // If we got here, the algorithm is supported
+                            return digestChunks();
+                        })
+                        .catch(e => {
+                            // Use SparkMD5 for MD5 as a fallback if browser doesn't support it
+                            if (algorithm === 'MD5') {
+                                // Add SparkMD5 library as it's more compatible
+                                const script = document.createElement('script');
+                                script.src = 'https://cdnjs.cloudflare.com/ajax/libs/spark-md5/3.0.2/spark-md5.min.js';
+                                document.head.appendChild(script);
+                                
+                                script.onload = () => {
+                                    calculateMD5WithSparkMD5(file)
+                                        .then(resolve)
+                                        .catch(reject);
+                                };
+                                
+                                script.onerror = () => {
+                                    reject(new Error("Failed to load SparkMD5 library"));
+                                };
+                            } else {
+                                reject(new Error(`Algorithm ${algorithm} is not supported`));
+                            }
+                        });
+                    
+                    async function digestChunks() {
+                        try {
+                            // Create hash context
+                            let hashObj = await crypto.digest(algorithm, new ArrayBuffer(0))
+                                .catch(() => null);
+                                
+                            if (!hashObj) {
+                                // If direct digest isn't supported, we'll read the whole file and digest at once
+                                const wholeFile = await readFileAsArrayBuffer(file);
+                                hashObj = await crypto.digest(algorithm, wholeFile);
+                                const hashArray = Array.from(new Uint8Array(hashObj));
+                                return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+                            }
+                            
+                            // Modern approach with incremental hashing
+                            // Note: This is a simplified implementation as incremental hashing 
+                            // is not directly supported in the Web Crypto API
+                            // We'll read the file in chunks and concatenate all chunks before hashing
+                            
+                            let fileBuffer = new ArrayBuffer(0);
+                            const reader = new FileReader();
+                            
+                            reader.onload = async (e) => {
+                                try {
+                                    // Concatenate chunks
+                                    const newBuffer = new Uint8Array(fileBuffer.byteLength + e.target.result.byteLength);
+                                    newBuffer.set(new Uint8Array(fileBuffer), 0);
+                                    newBuffer.set(new Uint8Array(e.target.result), fileBuffer.byteLength);
+                                    fileBuffer = newBuffer.buffer;
+                                    
+                                    // Update progress
+                                    offset += chunkSize;
+                                    const percentComplete = Math.min(100, Math.round((offset / fileSize) * 100));
+                                    
+                                    // Update status message with progress for the current algorithm
+                                    statusMessage.textContent = `${algorithm}: ${percentComplete}% processed`;
+                                    
+                                    if (offset < fileSize) {
+                                        // Read the next chunk
+                                        readNextChunk();
+                                    } else {
+                                        // All chunks have been read, calculate the final hash
+                                        const finalHash = await crypto.digest(algorithm, fileBuffer);
+                                        const hashArray = Array.from(new Uint8Array(finalHash));
+                                        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+                                        resolve(hashHex);
+                                    }
+                                } catch (error) {
+                                    reject(error);
+                                }
+                            };
+                            
+                            reader.onerror = (error) => {
+                                reject(error);
+                            };
+                            
+                            function readNextChunk() {
+                                const slice = file.slice(offset, offset + chunkSize);
+                                reader.readAsArrayBuffer(slice);
+                            }
+                            
+                            // Start reading the first chunk
+                            readNextChunk();
+                        } catch (error) {
+                            reject(error);
+                        }
+                    }
+                });
+            }
+            
+            // Calculate MD5 using SparkMD5 library for better compatibility
+            async function calculateMD5WithSparkMD5(file) {
+                return new Promise((resolve, reject) => {
+                    const chunkSize = 2 * 1024 * 1024; // 2MB chunks
+                    const fileSize = file.size;
+                    let offset = 0;
+                    
+                    const spark = new SparkMD5.ArrayBuffer();
+                    const fileReader = new FileReader();
+                    
+                    fileReader.onload = function(e) {
+                        spark.append(e.target.result);
+                        offset += chunkSize;
+                        
+                        const percentComplete = Math.min(100, Math.round((offset / fileSize) * 100));
+                        statusMessage.textContent = `MD5: ${percentComplete}% processed`;
+                        
+                        if (offset < fileSize) {
+                            loadNext();
+                        } else {
+                            resolve(spark.end());
+                        }
+                    };
+                    
+                    fileReader.onerror = function() {
+                        reject(new Error("Error reading file"));
+                    };
+                    
+                    function loadNext() {
+                        const slice = file.slice(offset, offset + chunkSize);
+                        fileReader.readAsArrayBuffer(slice);
+                    }
+                    
+                    // Start reading
+                    loadNext();
+                });
             }
             
             function readFileAsArrayBuffer(file) {

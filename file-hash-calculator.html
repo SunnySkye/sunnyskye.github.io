@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File Hash Calculator</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+            color: #333;
+        }
+        
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+            margin-bottom: 30px;
+        }
+        
+        .container {
+            background-color: #f9f9f9;
+            border-radius: 8px;
+            padding: 25px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        
+        .upload-area {
+            border: 2px dashed #7f8c8d;
+            border-radius: 5px;
+            padding: 25px;
+            text-align: center;
+            margin-bottom: 20px;
+            transition: all 0.3s;
+            background-color: #ecf0f1;
+        }
+        
+        .upload-area.highlight {
+            border-color: #3498db;
+            background-color: #e3f2fd;
+        }
+        
+        #fileInput {
+            display: none;
+        }
+        
+        .btn {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+        }
+        
+        .btn:hover {
+            background-color: #2980b9;
+        }
+        
+        .btn:disabled {
+            background-color: #95a5a6;
+            cursor: not-allowed;
+        }
+        
+        .hash-results {
+            margin-top: 30px;
+        }
+        
+        .hash-item {
+            margin-bottom: 15px;
+        }
+        
+        .hash-name {
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 5px;
+        }
+        
+        .hash-value {
+            background-color: #ecf0f1;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            word-break: break-all;
+            border: 1px solid #ddd;
+        }
+        
+        .file-info {
+            margin-top: 15px;
+            font-size: 14px;
+            color: #7f8c8d;
+        }
+        
+        .progress-container {
+            width: 100%;
+            height: 20px;
+            background-color: #ecf0f1;
+            border-radius: 10px;
+            margin: 20px 0;
+            overflow: hidden;
+            display: none;
+        }
+        
+        .progress-bar {
+            height: 100%;
+            background-color: #3498db;
+            width: 0%;
+            transition: width 0.3s;
+        }
+    </style>
+</head>
+<body>
+    <h1>File Hash Calculator</h1>
+    
+    <div class="container">
+        <div class="upload-area" id="dropArea">
+            <p>Drag & drop a file here or click to select</p>
+            <input type="file" id="fileInput">
+            <button class="btn" id="browseBtn">Browse Files</button>
+        </div>
+        
+        <div class="file-info" id="fileInfo"></div>
+        
+        <div class="progress-container" id="progressContainer">
+            <div class="progress-bar" id="progressBar"></div>
+        </div>
+        
+        <button class="btn" id="calculateBtn" disabled>Calculate Hashes</button>
+        
+        <div class="hash-results" id="hashResults"></div>
+    </div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const dropArea = document.getElementById('dropArea');
+            const fileInput = document.getElementById('fileInput');
+            const browseBtn = document.getElementById('browseBtn');
+            const calculateBtn = document.getElementById('calculateBtn');
+            const hashResults = document.getElementById('hashResults');
+            const fileInfo = document.getElementById('fileInfo');
+            const progressContainer = document.getElementById('progressContainer');
+            const progressBar = document.getElementById('progressBar');
+            
+            let selectedFile = null;
+            
+            // Event listeners for drag and drop
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                dropArea.addEventListener(eventName, preventDefaults, false);
+            });
+            
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropArea.addEventListener(eventName, highlight, false);
+            });
+            
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropArea.addEventListener(eventName, unhighlight, false);
+            });
+            
+            function highlight() {
+                dropArea.classList.add('highlight');
+            }
+            
+            function unhighlight() {
+                dropArea.classList.remove('highlight');
+            }
+            
+            // Handle file drop
+            dropArea.addEventListener('drop', handleDrop, false);
+            
+            function handleDrop(e) {
+                const dt = e.dataTransfer;
+                const files = dt.files;
+                
+                if (files.length > 0) {
+                    handleFiles(files[0]);
+                }
+            }
+            
+            // Handle file selection via button
+            browseBtn.addEventListener('click', () => {
+                fileInput.click();
+            });
+            
+            fileInput.addEventListener('change', () => {
+                if (fileInput.files.length > 0) {
+                    handleFiles(fileInput.files[0]);
+                }
+            });
+            
+            function handleFiles(file) {
+                selectedFile = file;
+                
+                // Display file info
+                const fileSize = formatFileSize(file.size);
+                fileInfo.innerHTML = `
+                    <strong>Selected File:</strong> ${file.name}<br>
+                    <strong>Type:</strong> ${file.type || 'unknown'}<br>
+                    <strong>Size:</strong> ${fileSize}
+                `;
+                
+                // Enable calculate button
+                calculateBtn.disabled = false;
+                
+                // Clear previous results
+                hashResults.innerHTML = '';
+            }
+            
+            function formatFileSize(bytes) {
+                if (bytes === 0) return '0 Bytes';
+                
+                const k = 1024;
+                const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+            }
+            
+            // Calculate hash button
+            calculateBtn.addEventListener('click', async () => {
+                if (!selectedFile) return;
+                
+                // Show progress bar
+                progressContainer.style.display = 'block';
+                progressBar.style.width = '0%';
+                
+                // Clear previous results
+                hashResults.innerHTML = '<p>Calculating hashes, please wait...</p>';
+                
+                // Disable the button
+                calculateBtn.disabled = true;
+                
+                try {
+                    const hashes = await calculateHashes(selectedFile);
+                    
+                    // Display results
+                    hashResults.innerHTML = '';
+                    
+                    const hashTypes = [
+                        { name: 'MD5', value: hashes.md5 },
+                        { name: 'SHA-1', value: hashes.sha1 },
+                        { name: 'SHA-256', value: hashes.sha256 },
+                        { name: 'SHA-384', value: hashes.sha384 },
+                        { name: 'SHA-512', value: hashes.sha512 }
+                    ];
+                    
+                    hashTypes.forEach(hash => {
+                        const hashItem = document.createElement('div');
+                        hashItem.className = 'hash-item';
+                        
+                        const hashName = document.createElement('div');
+                        hashName.className = 'hash-name';
+                        hashName.textContent = hash.name;
+                        
+                        const hashValue = document.createElement('div');
+                        hashValue.className = 'hash-value';
+                        hashValue.textContent = hash.value;
+                        
+                        hashItem.appendChild(hashName);
+                        hashItem.appendChild(hashValue);
+                        hashResults.appendChild(hashItem);
+                    });
+                } catch (error) {
+                    hashResults.innerHTML = `<p style="color: red;">Error calculating hashes: ${error.message}</p>`;
+                } finally {
+                    // Hide progress bar and re-enable button
+                    progressBar.style.width = '100%';
+                    setTimeout(() => {
+                        progressContainer.style.display = 'none';
+                        calculateBtn.disabled = false;
+                    }, 500);
+                }
+            });
+            
+            async function calculateHashes(file) {
+                const hashFunctions = {
+                    md5: 'MD5',
+                    sha1: 'SHA-1',
+                    sha256: 'SHA-256',
+                    sha384: 'SHA-384',
+                    sha512: 'SHA-512'
+                };
+                
+                const results = {};
+                const totalSteps = Object.keys(hashFunctions).length;
+                let completedSteps = 0;
+                
+                // Create a chunk reader to handle large files
+                for (const [key, algo] of Object.entries(hashFunctions)) {
+                    results[key] = await digestFile(file, algo);
+                    
+                    // Update progress
+                    completedSteps++;
+                    progressBar.style.width = `${(completedSteps / totalSteps) * 100}%`;
+                }
+                
+                return results;
+            }
+            
+            // Function to calculate a hash for a file
+            async function digestFile(file, algorithm) {
+                // Read the file as an ArrayBuffer
+                const arrayBuffer = await readFileAsArrayBuffer(file);
+                
+                // Use subtle crypto to calculate hash
+                const hashBuffer = await crypto.subtle.digest(algorithm, arrayBuffer);
+                
+                // Convert to hex string
+                const hashArray = Array.from(new Uint8Array(hashBuffer));
+                const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+                
+                return hashHex;
+            }
+            
+            function readFileAsArrayBuffer(file) {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    
+                    reader.onload = event => {
+                        resolve(event.target.result);
+                    };
+                    
+                    reader.onerror = error => {
+                        reject(error);
+                    };
+                    
+                    reader.readAsArrayBuffer(file);
+                });
+            }
+        });
+    </script>
+</body>
+</html>
